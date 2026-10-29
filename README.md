@@ -1,7 +1,7 @@
 # DSGE CCNL wage indexation
 
 Prototipo New Keynesian mensile con mercato del lavoro e regimi stilizzati di
-indicizzazione salariale. **Versione di lavoro v3, non ancora validata per un paper.**
+indicizzazione salariale. **Versione di lavoro v3.1, non ancora validata per un paper.**
 
 ## Regimi
 
@@ -38,7 +38,7 @@ diagnostica su un regime, non certifica tutti gli scenari.
 
 ## Struttura
 
-- `model/nk_ccnl_indexation_v3.py`: motore v3 originale senza modifiche.
+- `model/nk_ccnl_indexation_v3.py`: motore v3.1, nome conservato per compatibilità.
 - `config/baseline.json`: parametri modificabili senza toccare le equazioni.
 - `config/institutional.json`, `config/frequency_only.json`: esperimenti.
 - `run_model.py`: runner locale e Colab.
@@ -51,9 +51,10 @@ Il runner carica i JSON; `Parameters()` usa invece i default del motore.
 Configurazioni alternative: `--parameters FILE` e `--experiment FILE`
 (con modalità coerente con `--mode`).
 
-**Bug noto v3:** la scomposizione salariale esportata non sempre coincide con
-la soluzione. Un test riproduce il problema come fallimento atteso; dettagli in
-[validation.md](docs/validation.md).
+**Stato v3.1:** è eliminata la falsa convergenza del vecchio active set.
+Ogni soluzione restituita supera i controlli dei residui. Alcune configurazioni
+restano non risolte e sono segnalate esplicitamente; il loro fallimento non
+prova l'inesistenza dell'equilibrio. [Rapporto e risultati](docs/solver_v31/README.md).
 
 ## Riproducibilità
 
@@ -74,6 +75,17 @@ confronto di orizzonti, shock piccoli e bug di complementarità confermato.
 python diagnostics/run_diagnostics.py --output outputs/diagnostics
 ```
 
-Il solver v3 resta invariato: gli esiti per shock grandi non sono ancora affidabili
-come risultati quantitativi. Il prossimo intervento prioritario è la complementarità,
-prima di modificare la calibrazione o introdurre una Phillips ibrida.
+Il Colab mostra `run_status.json`, residui e metriche di propagazione.
+`RUN_SENSITIVITY_DIAGNOSTICS=True` esegue una suite opzionale sulla configurazione
+baseline; `RUN_TERMINAL_CHECK=True` confronta gli orizzonti per i regimi validi.
+I grafici escludono i casi non risolti e vanno letti insieme alla tabella di stato.
+Il runner CLI termina con errore se una run è incompleta, pur conservando i risultati validi.
+
+Per ripetere la griglia di validazione:
+
+```bash
+python diagnostics/validate_solver.py --output outputs/solver_validation
+```
+
+Restano prioritari i casi non risolti e la verifica di determinazione, prima di
+cambiare calibrazione, blocco energetico o Phillips curve.

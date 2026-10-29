@@ -46,10 +46,18 @@ def main():
       ('phi_15',{'phi_pi':1.5},1.),('phi_12',{'phi_pi':1.2},1.),
       ('omega_065',{'omega_q':.65},1.),('omega_085',{'omega_q':.85},1.),
       ('drift_zero',{'wage_drift_speed_m':0.},1.)]
-    rows=[];horizons=[];cache={}
+    rows=[];horizons=[];cache={};failures=[]
+    def solve(pp,spec,shock,size,T=None,case=""):
+        try:
+            return nk.solve_irf(pp,cfg,spec,shock,size,T)
+        except nk.SolverConvergenceError as exc:
+            failures.append(dict(case=case,regime=spec.key,shock=shock,horizon=T or pp.solve_horizon_months,error=str(exc)))
+            print("FAILED",case,spec.key,shock,str(exc),flush=True)
+            return None
     for name,overrides,scale in cases:
       for spec in (mobile,matched,none):
-        pp=replace(p,**overrides);df=nk.solve_irf(pp,cfg,spec,'cost_push',cfg.shock_sizes['cost_push']*scale)
+        pp=replace(p,**overrides);df=solve(pp,spec,'cost_push',cfg.shock_sizes['cost_push']*scale,case=name)
+        if df is None: continue
         row=dict(case=name,regime=spec.key,shock='cost_push',horizon=pp.solve_horizon_months,shock_scale=scale,**measure(df,pp,cfg,spec,'cost_push'))
         rows.append(row);cache[(name,spec.key)]=df
         print(name,spec.key,'rule_error',row['floor_rule_max_error'],flush=True)
@@ -57,8 +65,9 @@ def main():
     for shock in ('cost_push','energy'):
       for spec in nk.get_regime_specs(cfg)+[none]:
         small=cache.get(('baseline',spec.key)) if shock=='cost_push' else None
-        if small is None: small=nk.solve_irf(p,cfg,spec,shock,cfg.shock_sizes[shock])
-        large=nk.solve_irf(p,cfg,spec,shock,cfg.shock_sizes[shock],840)
+        if small is None: small=solve(p,spec,shock,cfg.shock_sizes[shock],case='horizon_600')
+        large=solve(p,spec,shock,cfg.shock_sizes[shock],840,case='horizon_840')
+        if small is None or large is None: continue
         cols=['pi_headline','pi_nei','wpi_contract','weff_r','mc','y','i']
         x=small[cols].iloc[:120].to_numpy();y=large[cols].iloc[:120].to_numpy()
         horizons.append(dict(shock=shock,regime=spec.key,T1=600,T2=840,
@@ -70,10 +79,12 @@ def main():
     # Scala shock energia: distingue amplificazione lineare e vincoli nonlineari.
     for scale in (.1,.01):
       for spec in (mobile,matched,none):
-        df=nk.solve_irf(p,cfg,spec,'energy',cfg.shock_sizes['energy']*scale)
+        df=solve(p,spec,'energy',cfg.shock_sizes['energy']*scale,case=f'energy_scale_{scale}')
+        if df is None: continue
         rows.append(dict(case='energy_scale',regime=spec.key,shock='energy',horizon=600,shock_scale=scale,**measure(df,p,cfg,spec,'energy')))
     pd.DataFrame(rows).to_csv(a.output/'metrics.csv',index=False)
-    pd.DataFrame(horizons).to_csv(a.output/'horizons.csv',index=False)
+    pd.DataFrame(horizons,columns=['shock','regime','T1','T2','max_abs_difference','relative_max_difference','inflation_max_diff_pp_annual']).to_csv(a.output/'horizons.csv',index=False)
+    pd.DataFrame(failures,columns=['case','regime','shock','horizon','error']).to_csv(a.output/'failures.csv',index=False)
     meta=dict(parameters=asdict(p),experiment=asdict(cfg),cases=cases,measurement_months=120,
       source_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),python=platform.python_version())
     (a.output/'configuration.json').write_text(json.dumps(meta,indent=2))

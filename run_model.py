@@ -20,8 +20,13 @@ def main():
         parser.error('La modalità della configurazione non coincide con --mode')
     if args.shock:
         cfg.shocks_to_run = (args.shock,)
+    failed = False
     for folder in run_all_default_shocks(params, cfg, args.output, run_terminal_check=args.terminal_check):
         print(folder.resolve())
+        status = json.loads((folder / 'run_status.json').read_text())
+        failed |= not status['all_requested_scenarios_valid'] or bool(status['terminal_checks_failed'])
+    if failed:
+        raise SystemExit('Run incompleta: consultare run_status.json; gli scenari non validati non sono esportati.')
 
 if __name__ == '__main__':
     main()

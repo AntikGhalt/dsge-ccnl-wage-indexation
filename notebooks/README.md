@@ -18,3 +18,11 @@ Colab non tornano automaticamente su GitHub.
 
 Verifica locale: sintassi di tutte le celle e run cost-push a 180 mesi con grafici.
 Il clone/setup e il mount di Google Drive richiedono verifica nella sessione Colab.
+
+## Solver v3.1
+
+La tabella di stato precede ogni confronto. Un caso non risolto non compare nei
+grafici; questo non prova l'inesistenza di un equilibrio. Le metriche aggiuntive
+sono in `propagation_metrics.csv`, i residui in `numerical_diagnostics.csv`.
+La sensitivity opzionale usa i JSON baseline del repository, non i parametri
+personalizzati. I test terminali opzionali usano invece i parametri della run.

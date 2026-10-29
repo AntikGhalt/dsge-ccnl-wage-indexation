@@ -1,7 +1,7 @@
 """
 ===============================================================================
 NEW KEYNESIAN + SEARCH & MATCHING + CCNL INDEXATION / BARGAINING
-Versione 3 - prototipo mensile per confronto istituzionale e ceteris paribus
+Versione 3.1 - solver verificato, prototipo mensile per confronto istituzionale e ceteris paribus
 ===============================================================================
 
 IDEA CENTRALE
@@ -55,12 +55,11 @@ METODO NUMERICO
 ---------------
 Il blocco macro e' lineare dato un sentiero di crescita salariale contrattuale.
 La regola salariale e il floor nominale rendono il sistema piecewise/nonlineare.
-Usiamo quindi un fixed point:
-  1. ipotizziamo un sentiero wpi_contract;
-  2. risolviamo il sistema macro lineare con aspettative perfette;
-  3. ricalcoliamo indicizzazione/catch-up/bargaining/floor;
-  4. aggiorniamo il sentiero e ripetiamo.
-
+Il solver aggiorna i vincoli in entrambe le direzioni (Newton semismooth),
+con backtracking sul residuo della regola salariale. Ogni soluzione restituita
+supera controlli delle equazioni, del floor e della complementarita'. Se la
+ricerca non trova una soluzione verificata, solleva SolverConvergenceError.
+Questo fallimento non dimostra l'inesistenza di un equilibrio.
 Questo resta un PROTOTIPO. Non e' stimato sull'Italia e non sostituisce una
 verifica QZ/Gensys/Blanchard-Kahn formale.
 ===============================================================================
@@ -648,7 +647,8 @@ def _build_and_solve(
     bargaining_coeffs,
     forecast_F,
     catchup_coeffs,
-) -> pd.DataFrame:
+    return_system: bool = False,
+):
     A = lil_matrix((NVAR * T, NVAR * T), dtype=float)
     b = np.zeros(NVAR * T)
     base_growth = _baseline_contract_growth(params, regime, T)
@@ -806,9 +806,15 @@ def _build_and_solve(
     if row != NVAR*T:
         raise RuntimeError(f"Sistema non quadrato: {row} vs {NVAR*T}")
 
-    sol = splu(A.tocsc()).solve(b)
+    A = A.tocsc()
+    if return_system:
+        return A, b
+    try:
+        sol = splu(A).solve(b)
+    except RuntimeError as exc:
+        raise SolverConvergenceError(f"Sistema lineare non risolvibile: {exc}") from exc
     if not np.all(np.isfinite(sol)):
-        raise RuntimeError("Soluzione con NaN/Inf")
+        raise SolverConvergenceError("Soluzione con NaN/Inf")
     df=pd.DataFrame(sol.reshape(T,NVAR), columns=VARS)
     df.insert(0,"month",np.arange(T))
     return df
@@ -876,6 +882,10 @@ def _evaluate_wage_components(
 # 6. SOLVER ACTIVE-SET
 # =============================================================================
 
+class SolverConvergenceError(RuntimeError):
+    """Nessuna soluzione numericamente verificata trovata dal solver."""
+
+
 def solve_irf(
     params: Parameters,
     cfg: ExperimentConfig,
@@ -884,51 +894,85 @@ def solve_irf(
     shock_size: float,
     solve_horizon_months: int | None = None,
 ) -> pd.DataFrame:
-    T=int(solve_horizon_months or params.solve_horizon_months)
+    if shock_type not in cfg.shock_sizes or not np.isfinite(shock_size):
+        raise ValueError("Tipo di shock sconosciuto o ampiezza non finita")
+    T=int(params.solve_horizon_months if solve_horizon_months is None else solve_horizon_months)
     cal=calibrate_monthly(params)
     bargaining_coeffs,forecast_F,catchup_coeffs=_wage_rule_linear_objects(params,regime,T)
 
-    floor_active=np.zeros(T,dtype=bool)
-    catchup_active=np.zeros(T,dtype=bool)
-    converged=False
     max_iter=int(params.active_set_max_iter)
     tol=float(params.active_set_tol)
+    if T < 2 or max_iter < 1 or not np.isfinite(tol) or tol <= 0:
+        raise ValueError("Orizzonte >=2, iterazioni >=1 e tolleranza positiva richiesti")
 
+    def components(frame):
+        return _evaluate_wage_components(frame,params,regime,bargaining_coeffs,forecast_F,catchup_coeffs)
+
+    def residual(frame):
+        c=components(frame)
+        return frame["wpi_contract"].to_numpy()-c["final"], c
+
+    def masks(frame,c):
+        # Ogni iterazione può attivare E disattivare entrambi i vincoli.
+        floor=c["proposed"] < -c["baseline_growth"]
+        catch=np.zeros(T,dtype=bool)
+        for t,coef in catchup_coeffs.items():
+            catch[t]=float(np.dot(coef,frame["pi_nei"].to_numpy())) > 0
+        return floor,catch
+
+    # Punto iniziale che soddisfa tutte le equazioni macro lineari.
+    df=_build_and_solve(params,cal,regime,shock_type,shock_size,T,
+        np.zeros(T,dtype=bool),np.zeros(T,dtype=bool),
+        bargaining_coeffs,forecast_F,catchup_coeffs)
+    converged=False
+    line_search_steps=0
     for it in range(max_iter):
-        df=_build_and_solve(
-            params,cal,regime,shock_type,shock_size,T,
-            floor_active,catchup_active,
-            bargaining_coeffs,forecast_F,catchup_coeffs,
-        )
-        comp=_evaluate_wage_components(df,params,regime,bargaining_coeffs,forecast_F,catchup_coeffs)
-        # Per il floor usiamo un active set conservativo: una volta che un mese
-        # richiede il vincolo nominale, resta vincolato nelle iterazioni successive.
-        # Evita cicli numerici vicino alla frontiera baseline+deviazione=0.
-        new_floor = floor_active | (comp["proposed"] < (-comp["baseline_growth"]-tol))
-
-        new_catch=catchup_active.copy()
-        if regime.rule=="traditional" and params.catchup_rate>0:
-            pi=df["pi_nei"].to_numpy()
-            for t,coef in catchup_coeffs.items():
-                raw=float(np.dot(coef,pi))
-                if raw>tol:
-                    new_catch[t]=True
-
-        if np.array_equal(new_floor,floor_active) and np.array_equal(new_catch,catchup_active):
+        res,comp=residual(df)
+        if float(np.max(np.abs(res))) <= tol:
             converged=True
             break
-        floor_active=new_floor
-        catchup_active=new_catch
+        floor_active,catchup_active=masks(df,comp)
+        candidate=_build_and_solve(params,cal,regime,shock_type,shock_size,T,
+            floor_active,catchup_active,bargaining_coeffs,forecast_F,catchup_coeffs)
+        # Newton semismooth con backtracking. Le combinazioni convesse di due
+        # soluzioni macro preservano tutte le equazioni lineari non salariali.
+        merit=float(np.dot(res,res))
+        values=df[VARS].to_numpy()
+        direction=candidate[VARS].to_numpy()-values
+        accepted=False
+        for backtrack in range(25):
+            step=0.5**backtrack
+            trial=df.copy()
+            trial[VARS]=values+step*direction
+            trial_res,_=residual(trial)
+            trial_merit=float(np.dot(trial_res,trial_res))
+            if trial_merit <= (1-1e-4*step)*merit or np.max(np.abs(trial_res)) <= tol:
+                df=trial
+                line_search_steps+=backtrack
+                accepted=True
+                break
+        if not accepted:
+            raise SolverConvergenceError(f"Solver: line search fallita ({regime.key}, {shock_type}); residuo={np.max(np.abs(res)):.3e}")
 
-    # Ultima soluzione coerente con active set finale.
-    df=_build_and_solve(
-        params,cal,regime,shock_type,shock_size,T,
-        floor_active,catchup_active,bargaining_coeffs,forecast_F,catchup_coeffs,
-    )
-    comp=_evaluate_wage_components(df,params,regime,bargaining_coeffs,forecast_F,catchup_coeffs)
-
+    res,comp=residual(df)
+    converged=bool(np.max(np.abs(res)) <= tol)
     if not converged:
-        warnings.warn(f"Active set non stabilizzato entro {max_iter} iterazioni: {regime.key}, shock={shock_type}")
+        raise SolverConvergenceError(f"Solver non convergente in {max_iter} iterazioni ({regime.key}, {shock_type}); residuo={np.max(np.abs(res)):.3e}")
+    floor_active,catchup_active=masks(df,comp)
+    A,b=_build_and_solve(params,cal,regime,shock_type,shock_size,T,
+        floor_active,catchup_active,bargaining_coeffs,forecast_F,catchup_coeffs,return_system=True)
+    eq_res=A @ df[VARS].to_numpy().reshape(-1)-b
+    # La riga 26 è la regola piecewise esatta, valutata senza approssimarla.
+    eq_res[25::NVAR]=res
+    equation_max=float(np.max(np.abs(eq_res)))
+    nominal_min=float(np.min(df["wpi_contract"].to_numpy()+comp["baseline_growth"]))
+    if equation_max > max(10*tol,1e-9) or nominal_min < -max(10*tol,1e-9):
+        raise SolverConvergenceError(f"Validazione numerica fallita: residuo={equation_max:.3e}, minimo nominale={nominal_min:.3e}")
+    df["solver_iterations"]=it+1
+    df["solver_backtracks"]=line_search_steps
+    df["wage_rule_residual"]=res
+    df["equation_residual_max"]=equation_max
+    df["numerically_valid"]=True
 
     df["wpi_indexation"]=comp["indexation"]
     df["wpi_forecast"]=comp["forecast"]
@@ -1166,7 +1210,7 @@ def equation_guide() -> pd.DataFrame:
         [11, "Minimo reale", "wmin_r=wmin_r(-1)+wpi_contract-pi_headline", "Potere d'acquisto del minimo"],
         [12, "Salario effettivo", "weff_r=weff_r(-1)+wpi_eff-pi_headline", "Retribuzione pagata"],
         [13, "Wage drift", "drift=rho_d drift(-1)+(1-rho_d)lambda_d(wb-weff_r(-1))", "Aumenti individuali"],
-        [14, "Regola salariale", "wpi_contract = indexation + catchup + bargaining + floor", "Piecewise fixed point"],
+        [14, "Regola salariale", "wpi_contract = indexation + catchup + bargaining + floor", "Semismooth Newton, residui verificati"],
     ]
     return pd.DataFrame(rows, columns=["eq", "name", "equation", "interpretation"])
 
@@ -1290,6 +1334,53 @@ def terminal_horizon_check(
 # 9. BATCH RUN
 # =============================================================================
 
+def numerical_diagnostics(df: pd.DataFrame) -> Dict[str, float | int | bool | str]:
+    """Controlli riferiti alla soluzione restituita, non validazione economica."""
+    parts=df.wpi_indexation+df.wpi_catchup+df.wpi_bargaining+df.wpi_floor_adjustment
+    return {
+        "regime":str(df.regime_key.iloc[0]),
+        "numerically_valid":bool(df.numerically_valid.all()),
+        "solver_iterations":int(df.solver_iterations.iloc[0]),
+        "solver_backtracks":int(df.solver_backtracks.iloc[0]),
+        "wage_rule_max_abs_residual":float(df.wage_rule_residual.abs().max()),
+        "equation_max_abs_residual":float(df.equation_residual_max.max()),
+        "component_max_abs_residual":float((df.wpi_contract-parts).abs().max()),
+        "nominal_contract_growth_min":float((df.wpi_contract+df.baseline_contract_growth).min()),
+        "floor_binding_months":int(df.floor_binding.sum()),
+        "catchup_binding_months":int(df.catchup_binding.sum()),
+    }
+
+
+def propagation_metrics(df: pd.DataFrame, params: Parameters, months: int) -> Dict:
+    """Metriche descrittive su finestra finita; non identificano da sole second round."""
+    H=min(int(months),len(df))
+    if H < 1:
+        raise ValueError("La finestra delle metriche deve essere positiva")
+    pi=df.pi_headline.iloc[:H].to_numpy()
+    # Include anche il forcing ritardato; si cerca l'esaurimento sull'intera soluzione.
+    forcing=(df.zcost+df.xenergy_core+params.energy_weight_headline*df.zenergy).to_numpy()
+    peak=float(np.max(np.abs(forcing)))
+    active=np.flatnonzero(np.abs(forcing)>0.05*peak) if peak>1e-14 else np.array([],dtype=int)
+    exhausted=int(active[-1]+1) if len(active) else None
+    post=pi[exhausted:] if exhausted is not None and exhausted<H else np.array([])
+    exceeds=np.flatnonzero(np.abs(pi)>0.1*np.max(np.abs(pi)))
+    last=int(exceeds[-1]) if len(exceeds) else -1
+    return {
+        "regime":str(df.regime_key.iloc[0]),"months_observed":H,
+        "positive_inflation_area_logpct":float(100*np.maximum(pi,0).sum()),
+        "net_price_change_logpct":float(100*pi.sum()),
+        "absolute_tail_from_month24_logpct":float(100*np.abs(pi[24:]).sum()),
+        "last_month_above_10pct_peak":last,
+        "tail_still_above_threshold_at_window_end":bool(last==H-1),
+        "forcing_below_5pct_from_month":exhausted,
+        "forcing_decay_censored":bool(len(active) and active[-1]==len(df)-1),
+        "post_forcing_peak_pp_annual":float(1200*post.max()) if len(post) else None,
+        "headline_peak_pp_annual":float(1200*pi.max()),
+        "headline_trough_pp_annual":float(1200*pi.min()),
+        "output_min_pct":float(100*df.y.iloc[:H].min()),
+    }
+
+
 def run_shock_batch(
     params: Parameters,
     cfg: ExperimentConfig,
@@ -1312,42 +1403,73 @@ def run_shock_batch(
     specs = get_regime_specs(cfg)
     shock_size = cfg.shock_sizes[shock_type]
     results: Dict[str, pd.DataFrame] = {}
+    statuses=[]
+    diagnostics=[]
+    metrics=[]
+
+    def attempt(spec):
+        print(f"Solvo {cfg.mode} | shock={shock_type} | {spec.key}")
+        try:
+            df=solve_irf(params,cfg,spec,shock_type,shock_size)
+        except SolverConvergenceError as exc:
+            statuses.append({"regime":spec.key,"status":"failed","error":str(exc)})
+            print(f"NON VALIDATO: {exc}")
+            return None
+        statuses.append({"regime":spec.key,"status":"valid","error":None})
+        diagnostics.append(numerical_diagnostics(df))
+        metrics.append(propagation_metrics(df,params,params.plot_horizon_months))
+        return df
 
     for spec in specs:
-        print(
-            f"Solvo {cfg.mode:>14} | shock={shock_type:>10} | "
-            f"{spec.key:>20} | basis={spec.index_basis:>8} | scope={spec.scope}"
-        )
-        results[spec.key] = solve_irf(params, cfg, spec, shock_type, shock_size)
+        df=attempt(spec)
+        if df is not None:
+            results[spec.key]=df
 
-    all_irfs = pd.concat(results.values(), ignore_index=True)
-    all_irfs.to_csv(output_dir / "irf_all_scenarios.csv", index=False)
-    summarize_irfs(results, params.plot_horizon_months).to_csv(output_dir / "irf_summary.csv", index=False)
-    parameter_guide(params, cfg).to_csv(output_dir / "parameter_guide.csv", index=False)
-    equation_guide().to_csv(output_dir / "equation_guide.csv", index=False)
-    specification_table(params, cfg).to_csv(output_dir / "model_specification.csv", index=False)
+    if results:
+        pd.concat(results.values(),ignore_index=True).to_csv(output_dir/"irf_all_scenarios.csv",index=False)
+        summarize_irfs(results,params.plot_horizon_months).to_csv(output_dir/"irf_summary.csv",index=False)
+        manifest=_plot_comparison(results,params,shock_type,output_dir,variables_to_plot)
+    else:
+        pd.DataFrame(columns=VARS+["regime_key"]).to_csv(output_dir/"irf_all_scenarios.csv",index=False)
+        pd.DataFrame(columns=["regime","variable"]).to_csv(output_dir/"irf_summary.csv",index=False)
+        manifest=pd.DataFrame(columns=["variable","file","note","warning"])
+    manifest.to_csv(output_dir/"plot_manifest.csv",index=False)
+    parameter_guide(params,cfg).to_csv(output_dir/"parameter_guide.csv",index=False)
+    equation_guide().to_csv(output_dir/"equation_guide.csv",index=False)
+    specification_table(params,cfg).to_csv(output_dir/"model_specification.csv",index=False)
+    with open(output_dir/"run_configuration.json","w",encoding="utf-8") as f:
+        json.dump({"parameters":asdict(params),"experiment":asdict(cfg)},f,indent=2,ensure_ascii=False)
 
-    manifest = _plot_comparison(results, params, shock_type, output_dir, variables_to_plot)
-    manifest.to_csv(output_dir / "plot_manifest.csv", index=False)
-
-    with open(output_dir / "run_configuration.json", "w", encoding="utf-8") as f:
-        json.dump({"parameters": asdict(params), "experiment": asdict(cfg)}, f, indent=2, ensure_ascii=False, default=str)
-
+    terminal=[]
     if run_terminal_check:
-        checks = []
-        # Per costo computazionale controlliamo il regime piu' lento / ultimo.
-        for spec in specs[-1:]:
-            checks.append(terminal_horizon_check(params, cfg, spec, shock_type, shock_size))
-        pd.DataFrame(checks).to_csv(output_dir / "terminal_horizon_check.csv", index=False)
+        # Copre tutti i regimi principali numericamente validi, non soltanto l'ultimo.
+        for spec in specs:
+            if spec.key in results:
+                try:
+                    terminal.append(terminal_horizon_check(params,cfg,spec,shock_type,shock_size))
+                except SolverConvergenceError as exc:
+                    terminal.append({"regime":spec.key,"shock_type":shock_type,"error":str(exc)})
+    pd.DataFrame(terminal,columns=["regime","shock_type","absolute_max_difference","relative_to_max_irf","horizon_1","horizon_2","error"]).to_csv(output_dir/"terminal_horizon_check.csv",index=False)
 
     if cfg.run_no_indexation_benchmark:
-        bdir = output_dir / "benchmark_no_indexation"
+        bdir=output_dir/"benchmark_no_indexation"
         bdir.mkdir(exist_ok=True)
-        bs = benchmark_spec()
-        bdf = solve_irf(params, cfg, bs, shock_type, shock_size)
-        bdf.to_csv(bdir / "benchmark_irf.csv", index=False)
-        summarize_irfs({bs.key: bdf}, params.plot_horizon_months).to_csv(bdir / "benchmark_summary.csv", index=False)
+        bdf=attempt(benchmark_spec())
+        if bdf is not None:
+            bdf.to_csv(bdir/"benchmark_irf.csv",index=False)
+            summarize_irfs({"benchmark_none":bdf},params.plot_horizon_months).to_csv(bdir/"benchmark_summary.csv",index=False)
+        else:
+            pd.DataFrame(columns=VARS).to_csv(bdir/"benchmark_irf.csv",index=False)
+            pd.DataFrame(columns=["regime","variable"]).to_csv(bdir/"benchmark_summary.csv",index=False)
 
+    pd.DataFrame(diagnostics,columns=["regime","numerically_valid","solver_iterations","solver_backtracks","wage_rule_max_abs_residual","equation_max_abs_residual","component_max_abs_residual","nominal_contract_growth_min","floor_binding_months","catchup_binding_months"]).to_csv(output_dir/"numerical_diagnostics.csv",index=False)
+    pd.DataFrame(metrics,columns=["regime","months_observed","positive_inflation_area_logpct","net_price_change_logpct","absolute_tail_from_month24_logpct","last_month_above_10pct_peak","tail_still_above_threshold_at_window_end","forcing_below_5pct_from_month","forcing_decay_censored","post_forcing_peak_pp_annual","headline_peak_pp_annual","headline_trough_pp_annual","output_min_pct"]).to_csv(output_dir/"propagation_metrics.csv",index=False)
+    status={"all_requested_scenarios_valid":all(x["status"]=="valid" for x in statuses),
+            "scenarios":statuses,"terminal_checks_requested":run_terminal_check,
+            "terminal_checks_completed":len(terminal),
+            "terminal_checks_failed":sum("error" in x for x in terminal),
+            "interpretation":"Valid means residual checks passed, not economic validation or uniqueness."}
+    (output_dir/"run_status.json").write_text(json.dumps(status,indent=2,ensure_ascii=False),encoding="utf-8")
     return output_dir
 
 
