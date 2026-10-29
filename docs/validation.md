@@ -22,7 +22,7 @@ Non costituiscono validazione econometrica né prova di determinazione DSGE.
 - I rinnovi sono uniformi e deterministici, non CCNL reali estratti casualmente.
   Il calendario empirico resta uno sviluppo futuro.
 
-Il controllo generale del notebook seguirà il suo caricamento.
+Il notebook è stato collegato a GitHub; vedere notebooks/README.md per la copertura dei test.
 
 ## Bug v3 riprodotto: scomposizione salariale
 
@@ -34,3 +34,9 @@ diverse di attivazione e reporting. Non interpretare la scomposizione come una
 identità contabile verificata. Il test dedicato è marcato `expectedFailure`: una
 correzione dovrà rimuovere questa marcatura e controllare tutti gli scenari.
 Il motore originale è preservato; il problema non è stato corretto in questa importazione.
+
+## Diagnostica estesa
+
+Il [rapporto del 29 ottobre](diagnostics/README.md) verifica anche la regola
+economica della soluzione: il problema non è limitato al reporting.
+Sono presenti violazioni di complementarità pur con active set stabilizzato.

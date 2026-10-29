@@ -1,0 +1,157 @@
+{
+  "parameters": {
+    "beta_q": 0.996512207274539,
+    "sigma": 1.0,
+    "habit_m": 0.35,
+    "alpha": 0.7,
+    "phi": 1.0,
+    "omega_q": 0.75,
+    "phi_pi": 2.0,
+    "phi_y": 0.05,
+    "rho_i_q": 0.65,
+    "policy_inflation_measure": "headline",
+    "rho_a_q": 0.8,
+    "rho_m_q": 0.2,
+    "rho_cost_m": 0.55,
+    "rho_energy_m": 0.75,
+    "energy_weight_headline": 0.1,
+    "energy_core_loading": 0.08,
+    "rho_energy_core_m": 0.85,
+    "separation_q": 0.1,
+    "matching_elasticity_v": 0.5,
+    "vacancy_fill_q": 0.7,
+    "employment_ss": 0.8,
+    "labor_force_ss": 0.86,
+    "rho_lfp_m": 0.95,
+    "lfp_wage_elasticity": 0.03,
+    "lfp_output_elasticity": 0.02,
+    "markup_ss": 1.2,
+    "bargaining_power": 0.15,
+    "replacement_rate": 0.54,
+    "vacancy_cost_m": 5.0,
+    "minimum_share_effective_wage": 0.7,
+    "wage_drift_speed_m": 0.08,
+    "wage_drift_inertia_m": 0.4,
+    "baseline_inflation_annual": 0.02,
+    "bargaining_period_months": 36,
+    "bargaining_strength": 0.2,
+    "bargaining_timing": "staggered",
+    "bargaining_first_reset_month": 1,
+    "catchup_rate": 1.0,
+    "traditional_tranche_offsets": [
+      4,
+      8,
+      12
+    ],
+    "shock_calendar_month": 1,
+    "annual_reset_calendar_month": 6,
+    "mobile_index_lag_months": 1,
+    "solve_horizon_months": 600,
+    "plot_horizon_months": 180,
+    "active_set_max_iter": 30,
+    "active_set_tol": 1e-10,
+    "linearization_warning_pct": 20.0
+  },
+  "experiment": {
+    "mode": "institutional",
+    "run_no_indexation_benchmark": true,
+    "gamma_mobile": 1.0,
+    "gamma_annual_nei": 1.0,
+    "gamma_traditional": 1.0,
+    "frequency_intervals": [
+      1,
+      12,
+      36
+    ],
+    "frequency_basis": "nei",
+    "frequency_scope": "minimum",
+    "frequency_timing": "staggered",
+    "frequency_gamma": 1.0,
+    "shocks_to_run": [
+      "cost_push",
+      "energy",
+      "technology"
+    ],
+    "shock_sizes": {
+      "cost_push": 0.001,
+      "energy": 0.01,
+      "technology": 0.01,
+      "monetary_easing": 0.0002,
+      "monetary_tightening": 0.0002
+    },
+    "output_prefix": "ccnl_indexation_irf"
+  },
+  "cases": [
+    [
+      "baseline",
+      {},
+      1.0
+    ],
+    [
+      "rho_075",
+      {
+        "rho_cost_m": 0.75
+      },
+      1.0
+    ],
+    [
+      "rho_090",
+      {
+        "rho_cost_m": 0.9
+      },
+      1.0
+    ],
+    [
+      "rho_075_equal_area",
+      {
+        "rho_cost_m": 0.75
+      },
+      0.5555555555555556
+    ],
+    [
+      "rho_090_equal_area",
+      {
+        "rho_cost_m": 0.9
+      },
+      0.22222222222222224
+    ],
+    [
+      "phi_15",
+      {
+        "phi_pi": 1.5
+      },
+      1.0
+    ],
+    [
+      "phi_12",
+      {
+        "phi_pi": 1.2
+      },
+      1.0
+    ],
+    [
+      "omega_065",
+      {
+        "omega_q": 0.65
+      },
+      1.0
+    ],
+    [
+      "omega_085",
+      {
+        "omega_q": 0.85
+      },
+      1.0
+    ],
+    [
+      "drift_zero",
+      {
+        "wage_drift_speed_m": 0.0
+      },
+      1.0
+    ]
+  ],
+  "measurement_months": 120,
+  "source_commit": "4b030fc87caf2c72c485472c474fcc6462143f8b",
+  "python": "3.12.14"
+}

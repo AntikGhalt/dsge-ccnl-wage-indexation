@@ -42,7 +42,7 @@ diagnostica su un regime, non certifica tutti gli scenari.
 - `config/baseline.json`: parametri modificabili senza toccare le equazioni.
 - `config/institutional.json`, `config/frequency_only.json`: esperimenti.
 - `run_model.py`: runner locale e Colab.
-- `notebooks/`: istruzioni; notebook ancora da caricare.
+- `notebooks/run_model_colab.ipynb`: notebook collegato al modello su GitHub.
 - `docs/model_specification.md`: specifica economica originale.
 - `docs/validation.md`: limiti e verifiche necessarie.
 - `tests/`: controlli numerici automatici.
@@ -61,5 +61,19 @@ Conservare SHA del commit e `run_configuration.json` con i risultati.
 Le dipendenze hanno intervalli compatibili, non un lockfile esatto.
 Consultare [i limiti del solver](docs/validation.md) prima di interpretare le IRF.
 
-Prossimo passo: caricare `notebooks/run_model_colab.ipynb` per controllare
-integrazione, parametri, grafici e riproducibilità con il motore versionato.
+## Colab e prima diagnostica
+
+[Apri in Colab](https://colab.research.google.com/github/AntikGhalt/dsge-ccnl-wage-indexation/blob/main/notebooks/run_model_colab.ipynb).
+Il notebook carica modello e JSON dal repository; non serve caricare manualmente il Python.
+Ogni run conserva commit e configurazioni. Il salvataggio Drive è opzionale e non cancella le run precedenti.
+
+[Rapporto diagnostico e prossimi test](docs/diagnostics/README.md): sensitivity,
+confronto di orizzonti, shock piccoli e bug di complementarità confermato.
+
+```bash
+python diagnostics/run_diagnostics.py --output outputs/diagnostics
+```
+
+Il solver v3 resta invariato: gli esiti per shock grandi non sono ancora affidabili
+come risultati quantitativi. Il prossimo intervento prioritario è la complementarità,
+prima di modificare la calibrazione o introdurre una Phillips ibrida.

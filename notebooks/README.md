@@ -1,23 +1,20 @@
-# Notebook Colab da aggiungere
+# Colab collegato al repository
 
-Caricare qui `run_model_colab.ipynb`. Il notebook non è ancora incluso.
-Prima cella suggerita:
+[Apri il notebook](https://colab.research.google.com/github/AntikGhalt/dsge-ccnl-wage-indexation/blob/main/notebooks/run_model_colab.ipynb).
+Anche `DSGE_run_save.ipynb` e `SDGE_run.ipynb` nella radice sono stati aggiornati.
 
-```python
-!git clone https://github.com/AntikGhalt/dsge-ccnl-wage-indexation.git
-%cd /content/dsge-ccnl-wage-indexation
-%pip install -r requirements.txt
-```
+1. Eseguire il setup: scarica codice e configurazioni da GitHub.
+2. Scegliere esperimenti e modificare soltanto `CUSTOM_PARAMS` / `CUSTOM_SHOCK_SIZES`.
+3. Eseguire simulazioni, grafici e tabelle.
+4. Opzionalmente impostare `SAVE_TO_DRIVE=True`: salva una cartella distinta per run.
 
-Esecuzione e import:
+`GIT_REF='main'` usa la versione corrente; uno SHA fissa una versione riproducibile.
+Ogni run conserva commit, parametri, codice ed elenco delle librerie installate.
+Il salvataggio non cancella più la cartella dei risultati precedenti.
 
-```python
-!python run_model.py --mode institutional --shock energy
-from model.nk_ccnl_indexation_v3 import Parameters, ExperimentConfig, run_all_default_shocks
-```
+Una copia già aperta/salvata in Colab non aggiorna le proprie celle automaticamente:
+riaprire il link GitHub per usare il notebook aggiornato. Le modifiche fatte in
+Colab non tornano automaticamente su GitHub.
 
-Per la vecchia cella Colab v3, impostare `MODEL_FILE` a
-`/content/dsge-ccnl-wage-indexation/model/nk_ccnl_indexation_v3.py`.
-Confrontare il suo dizionario PARAMS con `config/baseline.json`.
-Output in `outputs/`; salvarli su Drive per conservarli oltre la sessione.
-Per riprodurre una ricerca, fissare un commit con `git checkout <SHA>`.
+Verifica locale: sintassi di tutte le celle e run cost-push a 180 mesi con grafici.
+Il clone/setup e il mount di Google Drive richiedono verifica nella sessione Colab.
