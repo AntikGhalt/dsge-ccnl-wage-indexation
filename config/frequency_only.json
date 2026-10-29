@@ -1,0 +1,29 @@
+{
+  "mode": "frequency_only",
+  "run_no_indexation_benchmark": true,
+  "gamma_mobile": 1.0,
+  "gamma_annual_nei": 1.0,
+  "gamma_traditional": 1.0,
+  "frequency_intervals": [
+    1,
+    12,
+    36
+  ],
+  "frequency_basis": "nei",
+  "frequency_scope": "minimum",
+  "frequency_timing": "staggered",
+  "frequency_gamma": 1.0,
+  "shocks_to_run": [
+    "cost_push",
+    "energy",
+    "technology"
+  ],
+  "shock_sizes": {
+    "cost_push": 0.001,
+    "energy": 0.01,
+    "technology": 0.01,
+    "monetary_easing": 0.0002,
+    "monetary_tightening": 0.0002
+  },
+  "output_prefix": "ccnl_indexation_irf"
+}
